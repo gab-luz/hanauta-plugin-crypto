@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 import sys
@@ -9,16 +10,47 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent
-APP_DIR = HERE.parents[1]
+APP_DIR = HERE
 
-if str(APP_DIR) not in sys.path:
-    sys.path.append(str(APP_DIR))
+
+def _find_hanauta_src() -> Path | None:
+    env_candidate = str(os.environ.get("HANAUTA_SRC", "")).strip()
+    candidates: list[Path] = []
+    if env_candidate:
+        candidates.append(Path(env_candidate).expanduser())
+    candidates.extend(
+        [
+            Path.home() / ".config" / "i3" / "hanauta" / "src",
+            Path.home() / ".local" / "share" / "hanauta" / "src",
+        ]
+    )
+    for parent in [HERE, *HERE.parents]:
+        candidates.append(parent / "hanauta" / "src")
+        candidates.append(parent / "src")
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if (candidate / "pyqt" / "shared" / "runtime.py").exists():
+            return candidate
+    return None
+
+
+HANAUTA_SRC = _find_hanauta_src()
+if HANAUTA_SRC is not None and str(HANAUTA_SRC) not in sys.path:
+    sys.path.append(str(HANAUTA_SRC))
 
 from pyqt.shared.crypto import build_price_alerts, load_settings_state, load_tracker_state, save_tracker_state
 from pyqt.shared.runtime import entry_command
 
 
-ACTION_NOTIFICATION_SCRIPT = APP_DIR / "pyqt" / "shared" / "action_notification.py"
+ACTION_NOTIFICATION_SCRIPT = (
+    HANAUTA_SRC / "pyqt" / "shared" / "action_notification.py"
+    if HANAUTA_SRC is not None
+    else HERE / "action_notification.py"
+)
 RUNNING = True
 
 

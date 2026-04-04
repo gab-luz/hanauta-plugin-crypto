@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 import sys
@@ -22,17 +23,103 @@ from PyQt6.QtWidgets import (
 )
 
 
-APP_DIR = Path(__file__).resolve().parents[2]
-ROOT = APP_DIR.parents[1]
-FONTS_DIR = ROOT / "assets" / "fonts"
-SETTINGS_PAGE_SCRIPT = APP_DIR / "pyqt" / "settings-page" / "settings.py"
+HERE = Path(__file__).resolve().parent
 
-if str(APP_DIR) not in sys.path:
-    sys.path.append(str(APP_DIR))
+
+def _find_hanauta_src() -> Path | None:
+    env_candidate = str(os.environ.get("HANAUTA_SRC", "")).strip()
+    candidates: list[Path] = []
+    if env_candidate:
+        candidates.append(Path(env_candidate).expanduser())
+    candidates.extend(
+        [
+            Path.home() / ".config" / "i3" / "hanauta" / "src",
+            Path.home() / ".local" / "share" / "hanauta" / "src",
+        ]
+    )
+    for parent in [HERE, *HERE.parents]:
+        candidates.append(parent / "hanauta" / "src")
+        candidates.append(parent / "src")
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if (candidate / "pyqt" / "shared" / "runtime.py").exists():
+            return candidate
+    return None
+
+
+HANAUTA_SRC = _find_hanauta_src()
+if HANAUTA_SRC is not None and str(HANAUTA_SRC) not in sys.path:
+    sys.path.append(str(HANAUTA_SRC))
+
+PROJECT_ROOT = HANAUTA_SRC.parents[1] if HANAUTA_SRC is not None else HERE.parent
+FONTS_DIR = PROJECT_ROOT / "assets" / "fonts"
+SETTINGS_PAGE_SCRIPT = (
+    HANAUTA_SRC / "pyqt" / "settings-page" / "settings.py"
+    if HANAUTA_SRC is not None
+    else HERE / "settings.py"
+)
 
 from pyqt.shared.crypto import fetch_chart, fetch_prices, load_settings_state, slug_to_name
-from pyqt.shared.runtime import entry_command, python_executable
-from pyqt.shared.theme import blend, load_theme_palette, palette_mtime, rgba
+try:
+    from pyqt.shared.runtime import entry_command, python_executable
+    from pyqt.shared.theme import blend, load_theme_palette, palette_mtime, rgba
+except Exception:
+    class _FallbackTheme:
+        text = "#f5eef7"
+        text_muted = "#b8b1c6"
+        primary = "#9f86ff"
+        secondary = "#86a9ff"
+        surface = "#14131a"
+        on_surface = "#f5eef7"
+        outline = "#6f6a7a"
+        primary_container = "#2b2248"
+        surface_container = "#1d1a27"
+        surface_container_high = "#262233"
+
+    def python_executable() -> str:
+        return sys.executable
+
+    def entry_command(script_path: Path | str, *args: str) -> list[str]:
+        script = Path(script_path).expanduser()
+        if not script.exists():
+            return []
+        return [python_executable(), str(script), *args]
+
+    def load_theme_palette() -> _FallbackTheme:
+        return _FallbackTheme()
+
+    def palette_mtime() -> float:
+        return 0.0
+
+    def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+        value = str(color).strip().lstrip("#")
+        if len(value) == 3:
+            value = "".join(ch * 2 for ch in value)
+        if len(value) != 6:
+            return (255, 255, 255)
+        try:
+            return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+        except ValueError:
+            return (255, 255, 255)
+
+    def rgba(color: str, alpha: float = 1.0) -> str:
+        red, green, blue = _hex_to_rgb(color)
+        return f"rgba({red}, {green}, {blue}, {max(0.0, min(1.0, float(alpha))):.3f})"
+
+    def blend(color_a: str, color_b: str, ratio: float = 0.5) -> str:
+        ratio = max(0.0, min(1.0, float(ratio)))
+        a_r, a_g, a_b = _hex_to_rgb(color_a)
+        b_r, b_g, b_b = _hex_to_rgb(color_b)
+        mixed = (
+            int(a_r * (1.0 - ratio) + b_r * ratio),
+            int(a_g * (1.0 - ratio) + b_g * ratio),
+            int(a_b * (1.0 - ratio) + b_b * ratio),
+        )
+        return f"#{mixed[0]:02x}{mixed[1]:02x}{mixed[2]:02x}"
 
 
 MATERIAL_ICONS = {
